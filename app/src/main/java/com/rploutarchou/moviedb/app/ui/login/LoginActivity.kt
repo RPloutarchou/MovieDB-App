@@ -2,31 +2,50 @@ package com.rploutarchou.moviedb.app.ui.login
 
 import android.app.Activity
 import android.content.Intent
-import androidx.lifecycle.Observer
-import androidx.lifecycle.ViewModelProvider
+import android.net.Uri
 import android.os.Bundle
-import androidx.annotation.StringRes
-import androidx.appcompat.app.AppCompatActivity
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Observer
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import com.android.volley.Request
+import com.android.volley.RequestQueue
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
-import com.rploutarchou.moviedb.app.MainActivity
 import com.rploutarchou.moviedb.app.databinding.ActivityLoginBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
-import com.rploutarchou.moviedb.app.R
+@Serializable
+data class RequestTokenPayload (
+    var success       : Boolean? = null,
+    var expires_at    : String?  = null,
+    var request_token : String?  = null
+)
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var auth: FirebaseAuth
     private lateinit var loginViewModel: LoginViewModel
     private lateinit var binding: ActivityLoginBinding
+    private lateinit var requestQueue: RequestQueue
+
+    companion object {
+        var reqToken: String? = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +81,8 @@ class LoginActivity : AppCompatActivity() {
             loading.visibility = View.GONE
 
             if (loginResult.error != null) {
-                showLoginFailed(loginResult.error)
+                Toast.makeText(baseContext, "Authentication Failed!",
+                    Toast.LENGTH_SHORT).show()
             }
 
             if (loginResult.success != null) {
@@ -70,7 +90,14 @@ class LoginActivity : AppCompatActivity() {
                     .addOnCompleteListener(this) { task ->
                         if (task.isSuccessful) {
                             val user = auth.currentUser
-                            updateUiWithUser(user)
+                            if (user != null) {
+                                requestQueue = Volley.newRequestQueue(this.baseContext)
+                                requestAppToken()
+                            }
+                            else {
+                                Toast.makeText(baseContext, "Authentication Failed!",
+                                    Toast.LENGTH_SHORT).show()
+                            }
                         }
                         else {
                             Toast.makeText(baseContext, "Authentication Failed!",
@@ -115,23 +142,28 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateUiWithUser(user: FirebaseUser?) {
-        val welcome = getString(R.string.welcome)
-        val displayName = user?.uid
-
-        Toast.makeText(
-                applicationContext,
-                "$welcome $displayName",
-                Toast.LENGTH_LONG
-        ).show()
-
-        val intent = Intent(this, MainActivity::class.java)
-        startActivity(intent)
-        finish()
-    }
-
-    private fun showLoginFailed(@StringRes errorString: Int) {
-        Toast.makeText(applicationContext, errorString, Toast.LENGTH_SHORT).show()
+    private fun requestAppToken() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val apiUrl = "https://api.themoviedb.org/3/authentication/token/new?api_key=b2d0076e854b8797cb934384dd3da22f"
+            val jsonObjectRequest = JsonObjectRequest(Request.Method.GET, apiUrl, null, {
+                Log.d("API Request Result", it.toString())
+                val obj = Json.decodeFromString<RequestTokenPayload>(it.toString())
+                if (obj.success == true) {
+                    Log.d("Request Token", obj.request_token.toString())
+                    reqToken = obj.request_token.toString()
+                    val browserIntent =
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.themoviedb.org/authenticate/$reqToken?redirect_to=http://moviedb.app.com/launch"))
+                    startActivity(browserIntent)
+                }
+                else {
+                    Toast.makeText(baseContext, "Authentication Failed!",
+                        Toast.LENGTH_SHORT).show()
+                }
+            }, {
+                Log.d("API Request Error", "${it.printStackTrace()}")
+            })
+            requestQueue.add(jsonObjectRequest)
+        }
     }
 }
 

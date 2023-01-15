@@ -1,6 +1,9 @@
 package com.rploutarchou.moviedb.app
+
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
+import android.widget.Toast
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.navigation.NavigationView
 import androidx.navigation.findNavController
@@ -10,18 +13,111 @@ import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.android.volley.Request
+import com.android.volley.RequestQueue
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
 import com.rploutarchou.moviedb.app.databinding.ActivityMainBinding
+import com.rploutarchou.moviedb.app.ui.login.LoginActivity.Companion.reqToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import org.json.JSONObject
+
+@Serializable
+data class SessionPayload (
+    var success       : Boolean? = null,
+    var session_id    : String?  = null
+)
+
+@Serializable
+data class AccountInfoPayload (
+    var avatar       : Avatar?  = Avatar(),
+    var id           : Int?     = null,
+    var iso_639_1      : String?  = null,
+    var iso_3166_1     : String?  = null,
+    var name         : String?  = null,
+    var include_adult : Boolean? = null,
+    var username     : String?  = null
+)
+
+@Serializable
+data class Avatar (
+    var gravatar : Gravatar? = Gravatar(),
+    var tmdb     : Tmdb?     = Tmdb()
+)
+
+@Serializable
+data class Gravatar  (
+    var hash : String? = null
+)
+
+@Serializable
+data class Tmdb   (
+    var avatar_path : String? = null
+)
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var appBarConfiguration: AppBarConfiguration
-private lateinit var binding: ActivityMainBinding
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var requestQueue: RequestQueue
+
+    companion object {
+        var sessionId: String? = null
+        var accountId: String? = null
+    }
+
+    private fun createSession() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val postBody = JSONObject()
+            postBody.put("request_token", reqToken)
+            val apiUrl = "https://api.themoviedb.org/3/authentication/session/new?api_key=b2d0076e854b8797cb934384dd3da22f"
+            val jsonObjectRequest = JsonObjectRequest(Request.Method.POST, apiUrl, postBody, {
+                Log.d("API Request Result", it.toString())
+                val obj = Json.decodeFromString<SessionPayload>(it.toString())
+                if (obj.success == true) {
+                    Log.d("Session ID", obj.session_id.toString())
+                    sessionId = obj.session_id.toString()
+                    accountInfo()
+                }
+                else {
+                    Toast.makeText(baseContext, "Creating Session Failed!",
+                        Toast.LENGTH_SHORT).show()
+                }
+            }, {
+                Log.d("API Request Error", "${it.printStackTrace()}")
+            })
+            requestQueue.add(jsonObjectRequest)
+        }
+    }
+
+    private fun accountInfo() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val apiUrl =
+                "https://api.themoviedb.org/3/account?api_key=b2d0076e854b8797cb934384dd3da22f&session_id=$sessionId"
+            val jsonObjectRequest = JsonObjectRequest(Request.Method.GET, apiUrl, null, {
+                Log.d("API Request Result", it.toString())
+                val obj = Json.decodeFromString<AccountInfoPayload>(it.toString())
+                Log.d("Account ID", obj.id.toString())
+                accountId = obj.id.toString()
+            }, {
+                Log.d("API Request Error", "${it.printStackTrace()}")
+            })
+            requestQueue.add(jsonObjectRequest)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-     binding = ActivityMainBinding.inflate(layoutInflater)
-     setContentView(binding.root)
+        Log.d("Req Token", reqToken.toString())
+
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         setSupportActionBar(binding.appBarMain.toolbar)
 
@@ -29,19 +125,21 @@ private lateinit var binding: ActivityMainBinding
             Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
                     .setAction("Action", null).show()
         }
+
         val drawerLayout: DrawerLayout = binding.drawerLayout
         val navView: NavigationView = binding.navView
         val navController = findNavController(R.id.nav_host_fragment_content_main)
-        // Passing each menu ID as a set of Ids because each
-        // menu should be considered as top level destinations.
+
         appBarConfiguration = AppBarConfiguration(setOf(
             R.id.nav_home, R.id.nav_gallery, R.id.nav_slideshow), drawerLayout)
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        requestQueue = Volley.newRequestQueue(this.baseContext)
+        createSession()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        // Inflate the menu; this adds items to the action bar if it is present.
         menuInflater.inflate(R.menu.main, menu)
         return true
     }
